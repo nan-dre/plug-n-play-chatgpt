@@ -5,8 +5,14 @@
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
 #include "pico/bootrom.h"
+#include "hardware/uart.h"
 
 #include "pio_usb.h"
+
+#define UART_ID uart1
+#define BAUD_RATE 115200
+#define UART_TX_PIN 4
+#define UART_RX_PIN 5
 
 static usb_device_t *usb_device = NULL;
 
@@ -32,7 +38,9 @@ int main() {
   set_sys_clock_khz(120000, true);
 
   stdio_init_all();
-  printf("hello!");
+  uart_init(UART_ID, BAUD_RATE);
+  gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
+  gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
 
   sleep_ms(10);
 
@@ -57,6 +65,7 @@ int main() {
           }
 
           uint8_t temp[64];
+          char out[64];
           int len = pio_usb_get_in_data(ep, temp, sizeof(temp));
 
           if (len > 0) {
@@ -64,6 +73,7 @@ int main() {
                    ep->ep_num);
             for (int i = 0; i < len; i++) {
               printf("%02x ", temp[i]);
+              uart_putc(UART_ID, temp[i]);
             }
             printf("\n");
           }
