@@ -75,6 +75,7 @@ int main() {
               printf("%02x ", temp[i]);
               uart_putc(UART_ID, temp[i]);
             }
+            uart_putc(UART_ID, 0xFF);
             printf("\n");
           }
         }

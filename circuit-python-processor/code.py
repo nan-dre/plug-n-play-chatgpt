@@ -1,6 +1,5 @@
 import usb_hid
 import board
-import time
 import busio
 import os
 import time
@@ -9,14 +8,20 @@ import wifi
 import socketpool
 import adafruit_requests
 import json
+import usb_cdc
 
 from adafruit_hid.keyboard import Keyboard
 from adafruit_hid.keycode import Keycode
 from adafruit_hid.keyboard_layout_us import KeyboardLayoutUS
 
+# Setup keybord UART communication
+keyboard_uart = busio.UART(board.GP0, board.GP1, baudrate=115200)
+
+# Setup USB monitor communication
+serial_monitor = usb_cdc.console
+
 # Set up a keyboard device.
 kbd = Keyboard(usb_hid.devices)
-keyboard_uart = busio.UART(board.GP0, board.GP1, baudrate=115200)
 layout = KeyboardLayoutUS(kbd)
 
 API_LINK = "https://api.openai.com/v1/engines/chat/completions"
@@ -27,8 +32,21 @@ API_KEY = os.getenv("OPENAI_API_KEY")
 if API_KEY is None:
     print("API KEY not found")
 
-wifi.radio.connect(SSID, PASSWORD)
-print("IP address is", wifi.radio.ipv4_address)
+time.sleep(1)
+
+
+def connect_to_wifi():
+    print("Available networks:")
+    for network in wifi.radio.start_scanning_networks():
+        print("\t%s\t\tRSSI: %d\tChannel: %d" % (str(network.ssid, "utf-8"), network.rssi, network.channel))
+    wifi.radio.stop_scanning_networks()
+    while wifi.radio.ipv4_address is None:
+        try:
+            wifi.radio.connect(SSID, PASSWORD)
+        except:
+            print("Couldn't connect to WiFi")
+    print("IP address is", wifi.radio.ipv4_address)
+
 
 def iter_lines(resp):
     partial_line = []
@@ -42,10 +60,8 @@ def iter_lines(resp):
         yield (b"".join(partial_line)).decode('utf-8')
 
 def call_chatgpt(text):
-    pool = socketpool.SocketPool(wifi.radio)
-    requests = adafruit_requests.Session(pool, ssl.create_default_context())
     full_prompt = [{"role": "user", "content": text},]
-
+    text_response = ""
     with requests.post("https://api.openai.com/v1/chat/completions",
         json={"model": "gpt-3.5-turbo", "messages": full_prompt, "stream": True},
         headers={
@@ -60,30 +76,52 @@ def call_chatgpt(text):
                         data = json.loads(line[5:])
                         word = data.get('choices')[0].get('delta').get('content')
                         if word is not None:
-                            layout.write(word)
+                            print(word, end="")
+                            text_response += word
+                            # layout.write(word)
             else:
                 print("Error: ", response.status_code, response.content)
+    return text_response
 
-i = 0
-pressed = False
-def read_uart(current_char, pressed):
-    if keyboard_uart.in_waiting >= 13:
-        try:
-            data = keyboard_uart.read(keyboard_uart.in_waiting)
-            print(data)
-            if not pressed:
-                pressed = True
-                layout.write(TEST_TEXT[i % len(TEST_TEXT)])
-            else:
-                i += 1
-                pressed = False
-        except:
-            pass
+def read_uart(current_uart_data):
+    if keyboard_uart.in_waiting:
+        to_read = keyboard_uart.in_waiting
+        bytes = keyboard_uart.read(to_read)
+        current_uart_data.extend(bytes)
 
 def read_from_serial_monitor():
-    if serial_monitor.in_waiting:
-        data = serial_monitor.read(serial_monitor.in_waiting)
-        return data.decode("utf-8")
-    return None
+    in_data = bytearray()
+    try:
+        while True:
+            if serial_monitor.in_waiting > 0:
+                byte = serial_monitor.read(1)
+                if byte == b'\n':
+                    return in_data.decode('utf-8')
+                else:
+                    in_data.append(byte[0]) 
+                    if len(in_data) == 129:
+                        in_data = in_data[128] + in_data[0:127]
+    except Exception as e:
+        print(e)
 
-# call_chatgpt("Test")
+
+#TODO: Use https://stackoverflow.com/a/75416309 to only retain last 5 answers
+# so that we don't waste lots of tokens
+# session_chats = []
+# current_prompt = read_from_serial_monitor()
+# while True:
+#     current_response = call_chatgpt(current_prompt)
+#     current_prompt += current_response
+#     current_prompt += read_from_serial_monitor()
+
+
+if __name__ == '__main__':
+    connect_to_wifi()
+    pool = socketpool.SocketPool(wifi.radio)
+    requests = adafruit_requests.Session(pool, ssl.create_default_context())
+    current_uart_data = bytearray()
+    while True:
+        read_uart(current_uart_data)
+        if len(current_uart_data) > 0 and current_uart_data[-1] == 255:
+            print(current_uart_data)
+            current_uart_data = bytearray()
