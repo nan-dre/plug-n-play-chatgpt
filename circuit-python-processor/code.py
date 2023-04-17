@@ -13,6 +13,7 @@ import usb_cdc
 from adafruit_hid.keyboard import Keyboard
 from adafruit_hid.keycode import Keycode
 from adafruit_hid.keyboard_layout_us import KeyboardLayoutUS
+from hid import HID_KEYCODE_TO_ASCII
 
 # Setup keybord UART communication
 keyboard_uart = busio.UART(board.GP0, board.GP1, baudrate=115200)
@@ -114,14 +115,33 @@ def read_from_serial_monitor():
 #     current_prompt += current_response
 #     current_prompt += read_from_serial_monitor()
 
+def list_diff(l1, l2):
+    return [x for x in l1 if x not in l2]
 
 if __name__ == '__main__':
-    connect_to_wifi()
-    pool = socketpool.SocketPool(wifi.radio)
-    requests = adafruit_requests.Session(pool, ssl.create_default_context())
+    # connect_to_wifi()
+    # pool = socketpool.SocketPool(wifi.radio)
+    # requests = adafruit_requests.Session(pool, ssl.create_default_context())
     current_uart_data = bytearray()
+    last_pressed = []
     while True:
         read_uart(current_uart_data)
         if len(current_uart_data) > 0 and current_uart_data[-1] == 255:
             print(current_uart_data)
+            keycodes = []
+            for i in range(3, 8):
+                character = HID_KEYCODE_TO_ASCII[current_uart_data[i]][0]
+                # Hit escape to exit
+                if character != 0:
+                    keycodes.append(layout.keycodes(character)[0])
+            print(keycodes)
+            pressed = list_diff(keycodes, last_pressed)
+            released = list_diff(last_pressed, keycodes)
+            for keycode in pressed:
+                print("Pressing: ", keycode)
+                kbd.press(keycode)
+            for keycode in released:
+                print("Releasing: ", keycode)
+                kbd.release(keycode)
+            last_pressed = keycodes
             current_uart_data = bytearray()
