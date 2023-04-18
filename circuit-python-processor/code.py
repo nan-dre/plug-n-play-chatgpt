@@ -13,7 +13,7 @@ import usb_cdc
 from adafruit_hid.keyboard import Keyboard
 from adafruit_hid.keycode import Keycode
 from adafruit_hid.keyboard_layout_us import KeyboardLayoutUS
-from hid import HID_KEYCODE_TO_ASCII
+from hid import HID_KEYCODE_TO_ASCII, MODIFIER_LIST
 
 # Setup keybord UART communication
 keyboard_uart = busio.UART(board.GP0, board.GP1, baudrate=115200)
@@ -129,19 +129,26 @@ if __name__ == '__main__':
         if len(current_uart_data) > 0 and current_uart_data[-1] == 255:
             print(current_uart_data)
             keycodes = []
+            modifiers = []
+
+            L_modifiers_mask = current_uart_data[1] & 0b00001111
+            R_modifiers_mask = (current_uart_data[1] & 0b11110000) >> 4
+
+            L_modifiers = [MODIFIER_LIST[i] for i in range(len(MODIFIER_LIST)) if (L_modifiers_mask >> i) & 1]
+            R_modifiers = [MODIFIER_LIST[i] for i in range(len(MODIFIER_LIST)) if (R_modifiers_mask >> i) & 1]
+            modifiers.extend(L_modifiers)
+            modifiers.extend(R_modifiers)
+            keycodes.extend(modifiers)
             for i in range(3, 8):
                 character = HID_KEYCODE_TO_ASCII[current_uart_data[i]][0]
-                # Hit escape to exit
                 if character != 0:
                     keycodes.append(layout.keycodes(character)[0])
             print(keycodes)
             pressed = list_diff(keycodes, last_pressed)
             released = list_diff(last_pressed, keycodes)
             for keycode in pressed:
-                print("Pressing: ", keycode)
                 kbd.press(keycode)
             for keycode in released:
-                print("Releasing: ", keycode)
                 kbd.release(keycode)
             last_pressed = keycodes
             current_uart_data = bytearray()

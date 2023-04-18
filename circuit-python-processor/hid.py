@@ -1,3 +1,4 @@
+from adafruit_hid.keyboard import Keycode
 HID_KEYCODE_TO_ASCII = [
     (0     , 0       ), # 0x00 
     (0     , 0       ), # 0x01 
@@ -103,4 +104,11 @@ HID_KEYCODE_TO_ASCII = [
     (0     , 0       ), # 0x65 
     (0     , 0       ), # 0x66 
     ('='   , '='     ) # 0x67 
+]
+
+MODIFIER_LIST = [
+    Keycode.CONTROL,
+    Keycode.SHIFT,
+    Keycode.ALT,
+    Keycode.GUI
 ]
