@@ -67,6 +67,7 @@ def call_chatgpt(text):
     requests = adafruit_requests.Session(pool, ssl.create_default_context())
     full_prompt = [{"role": "user", "content": text},]
     text_response = ""
+    layout.write("\n")
     with requests.post("https://api.openai.com/v1/chat/completions",
         json={"model": "gpt-3.5-turbo", "messages": full_prompt, "stream": True},
         headers={
@@ -75,6 +76,9 @@ def call_chatgpt(text):
         ) as response:
             if response.status_code == 200:
                 for line in iter_lines(response):
+                    # If the user wants to end the prompt early
+                    if keyboard_uart.in_waiting:
+                        break
                     if line.startswith("data: [DONE]"):
                         break
                     if line.startswith("data: "):
@@ -83,7 +87,10 @@ def call_chatgpt(text):
                         if word is not None:
                             print(word, end="")
                             text_response += word
-                            layout.write(word)
+                            try:
+                                layout.write(word)
+                            except:
+                                pass
             else:
                 print("Error: ", response.status_code, response.content)
     return text_response
@@ -133,6 +140,9 @@ if __name__ == '__main__':
     LED.value = False
     while True:
         read_uart(current_uart_data)
+        # Skip initial packet
+        if(len(current_uart_data) > 0 and current_uart_data[0] != 1):
+            continue
         if len(current_uart_data) > 0 and current_uart_data[-1] == 255:
             keycodes = []
             modifiers = []
@@ -187,7 +197,7 @@ if __name__ == '__main__':
                 if(len(pressed_characters) > 0):
                     # Exit if escape is pressed
                     if pressed_characters[0] == '\x1b':
-                        print("Exiting listening mode")
+                        print("Exiting listening mode and deleting history")
                         current_prompt = ""
                         listening_for_prompt = False
                         LED.value = False
@@ -202,10 +212,9 @@ if __name__ == '__main__':
             last_pressed_keycodes = keycodes
             last_pressed_characters = characters
 
-            if call_api == True:
+            if call_api == True and keycodes == []:
                 call_api = False
                 print(current_prompt)
-                call_chatgpt(current_prompt)
-                current_prompt = ""
+                current_prompt += call_chatgpt(current_prompt)
 
             current_uart_data = bytearray()
