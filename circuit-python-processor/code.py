@@ -13,7 +13,7 @@ import usb_cdc
 from adafruit_hid.keyboard import Keyboard
 from adafruit_hid.keycode import Keycode
 from adafruit_hid.keyboard_layout_us import KeyboardLayoutUS
-from hid import HID_KEYCODE_TO_ASCII, MODIFIER_LIST
+from hid import HID_KEYCODE_TO_ASCII, L_MODIFIER_LIST, R_MODIFIER_LIST
 from digitalio import DigitalInOut, Direction
 
 # Setup keybord UART communication
@@ -29,7 +29,6 @@ layout = KeyboardLayoutUS(kbd)
 LED = DigitalInOut(board.LED)
 LED.direction = Direction.OUTPUT
 API_LINK = "https://api.openai.com/v1/engines/chat/completions"
-TEST_TEXT = "This is a test text to be sent to the computer in order to see the typing speed and lag."
 SSID = os.getenv("WIFI_SSID")
 PASSWORD = os.getenv("WIFI_PASSWORD")
 API_KEY = os.getenv("OPENAI_API_KEY")
@@ -84,10 +83,7 @@ def call_chatgpt(text):
                         if word is not None:
                             print(word, end="")
                             text_response += word
-                            try:
-                                layout.write(word)
-                            except:
-                                pass
+                            layout.write(word)
             else:
                 print("Error: ", response.status_code, response.content)
     return text_response
@@ -144,26 +140,38 @@ if __name__ == '__main__':
 
             L_modifiers_mask = current_uart_data[1] & 0b00001111
             R_modifiers_mask = (current_uart_data[1] & 0b11110000) >> 4
-            L_modifiers = [MODIFIER_LIST[i] for i in range(len(MODIFIER_LIST)) if (L_modifiers_mask >> i) & 1]
-            R_modifiers = [MODIFIER_LIST[i] for i in range(len(MODIFIER_LIST)) if (R_modifiers_mask >> i) & 1]
+            L_modifiers = [L_MODIFIER_LIST[i] for i in range(len(L_MODIFIER_LIST)) if (L_modifiers_mask >> i) & 1]
+            R_modifiers = [R_MODIFIER_LIST[i] for i in range(len(R_MODIFIER_LIST)) if (R_modifiers_mask >> i) & 1]
             modifiers.extend(L_modifiers)
             modifiers.extend(R_modifiers)
             keycodes.extend(modifiers)
 
             for i in range(3, 8):
                 character = HID_KEYCODE_TO_ASCII[current_uart_data[i]][0]
-                if character != 0:
+                if character == '\xcc':
+                    keycodes.append(Keycode.CAPS_LOCK)
+                elif character == '\xaa':
+                    keycodes.append(Keycode.RIGHT_ARROW)
+                elif character == '\xab':
+                    keycodes.append(Keycode.LEFT_ARROW)
+                elif character == '\xac':
+                    keycodes.append(Keycode.DOWN_ARROW)
+                elif character == '\xad':
+                    keycodes.append(Keycode.UP_ARROW)
+                elif character != 0:
                     characters.append(character)
                     keycodes.append(layout.keycodes(character)[0])
+            
+            print(current_uart_data)
+            print(keycodes)
 
-            if keycodes == [Keycode.CONTROL, Keycode.ALT, Keycode.ENTER]:
+            if keycodes == [Keycode.CONTROL, Keycode.ALT, Keycode.G]:
                 if listening_for_prompt == False:
                     listening_for_prompt = True
                     LED.value = True
                 else:
                     listening_for_prompt = False
                     LED.value = False
-                    print(current_prompt)
                     call_api = True
 
             pressed_keycodes = list_diff(keycodes, last_pressed_keycodes)
@@ -185,14 +193,18 @@ if __name__ == '__main__':
                         LED.value = False
                     elif pressed_characters[0] == '\x08':
                         current_prompt = current_prompt[:-1]
-                    else:
-                        current_prompt += pressed_characters[0]
+                    elif (Keycode.CONTROL or Keycode.ALT or Keycode.GUI) not in keycodes:
+                            if Keycode.SHIFT in keycodes:
+                                current_prompt += pressed_characters[0].upper()
+                            else:
+                                current_prompt += pressed_characters[0]
 
             last_pressed_keycodes = keycodes
             last_pressed_characters = characters
 
             if call_api == True:
                 call_api = False
+                print(current_prompt)
                 call_chatgpt(current_prompt)
                 current_prompt = ""
 

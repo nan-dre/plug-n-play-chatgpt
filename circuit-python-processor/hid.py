@@ -57,7 +57,7 @@ HID_KEYCODE_TO_ASCII = [
     (','   , '<'     ), # 0x36 
     ('.'   , '>'     ), # 0x37 
     ('/'   , '?'     ), # 0x38 
-    (0     , 0       ), # 0x39 
+    ('\xcc', '\xcc'  ), # 0x39 
     (0     , 0       ), # 0x3a 
     (0     , 0       ), # 0x3b 
     (0     , 0       ), # 0x3c 
@@ -79,8 +79,10 @@ HID_KEYCODE_TO_ASCII = [
     (0     , 0       ), # 0x4c 
     (0     , 0       ), # 0x4d 
     (0     , 0       ), # 0x4e 
-    (0     , 0       ), # 0x4f 
-    (0     , 0       ), # 0x50 
+    ('\xaa', '\xaa'  ), # 0x4f 
+    ('\xab', '\xab'  ), # 0x50 
+    ('\xac', '\xac'  ), # 0x51 
+    ('\xad', '\xad'  ), # 0x50 
     (0     , 0       ), # 0x51 
     (0     , 0       ), # 0x52 
     (0     , 0       ), # 0x53 
@@ -106,9 +108,16 @@ HID_KEYCODE_TO_ASCII = [
     ('='   , '='     ) # 0x67 
 ]
 
-MODIFIER_LIST = [
-    Keycode.CONTROL,
-    Keycode.SHIFT,
-    Keycode.ALT,
-    Keycode.GUI
+L_MODIFIER_LIST = [
+    Keycode.LEFT_CONTROL,
+    Keycode.LEFT_SHIFT,
+    Keycode.LEFT_ALT,
+    Keycode.LEFT_GUI
+]
+
+R_MODIFIER_LIST = [
+    Keycode.RIGHT_CONTROL,
+    Keycode.RIGHT_SHIFT,
+    Keycode.RIGHT_ALT,
+    Keycode.RIGHT_GUI
 ]
