@@ -14,6 +14,7 @@ from adafruit_hid.keyboard import Keyboard
 from adafruit_hid.keycode import Keycode
 from adafruit_hid.keyboard_layout_us import KeyboardLayoutUS
 from hid import HID_KEYCODE_TO_ASCII, MODIFIER_LIST
+from digitalio import DigitalInOut, Direction
 
 # Setup keybord UART communication
 keyboard_uart = busio.UART(board.GP0, board.GP1, baudrate=115200)
@@ -25,6 +26,8 @@ serial_monitor = usb_cdc.console
 kbd = Keyboard(usb_hid.devices)
 layout = KeyboardLayoutUS(kbd)
 
+LED = DigitalInOut(board.LED)
+LED.direction = Direction.OUTPUT
 API_LINK = "https://api.openai.com/v1/engines/chat/completions"
 TEST_TEXT = "This is a test text to be sent to the computer in order to see the typing speed and lag."
 SSID = os.getenv("WIFI_SSID")
@@ -61,6 +64,8 @@ def iter_lines(resp):
         yield (b"".join(partial_line)).decode('utf-8')
 
 def call_chatgpt(text):
+    pool = socketpool.SocketPool(wifi.radio)
+    requests = adafruit_requests.Session(pool, ssl.create_default_context())
     full_prompt = [{"role": "user", "content": text},]
     text_response = ""
     with requests.post("https://api.openai.com/v1/chat/completions",
@@ -79,7 +84,10 @@ def call_chatgpt(text):
                         if word is not None:
                             print(word, end="")
                             text_response += word
-                            # layout.write(word)
+                            try:
+                                layout.write(word)
+                            except:
+                                pass
             else:
                 print("Error: ", response.status_code, response.content)
     return text_response
@@ -119,36 +127,73 @@ def list_diff(l1, l2):
     return [x for x in l1 if x not in l2]
 
 if __name__ == '__main__':
-    # connect_to_wifi()
-    # pool = socketpool.SocketPool(wifi.radio)
-    # requests = adafruit_requests.Session(pool, ssl.create_default_context())
+    connect_to_wifi()
     current_uart_data = bytearray()
-    last_pressed = []
+    last_pressed_keycodes = []
+    last_pressed_characters = []
+    current_prompt = ''
+    listening_for_prompt = False
+    call_api = False
+    LED.value = False
     while True:
         read_uart(current_uart_data)
         if len(current_uart_data) > 0 and current_uart_data[-1] == 255:
-            print(current_uart_data)
             keycodes = []
             modifiers = []
+            characters = []
 
             L_modifiers_mask = current_uart_data[1] & 0b00001111
             R_modifiers_mask = (current_uart_data[1] & 0b11110000) >> 4
-
             L_modifiers = [MODIFIER_LIST[i] for i in range(len(MODIFIER_LIST)) if (L_modifiers_mask >> i) & 1]
             R_modifiers = [MODIFIER_LIST[i] for i in range(len(MODIFIER_LIST)) if (R_modifiers_mask >> i) & 1]
             modifiers.extend(L_modifiers)
             modifiers.extend(R_modifiers)
             keycodes.extend(modifiers)
+
             for i in range(3, 8):
                 character = HID_KEYCODE_TO_ASCII[current_uart_data[i]][0]
                 if character != 0:
+                    characters.append(character)
                     keycodes.append(layout.keycodes(character)[0])
-            print(keycodes)
-            pressed = list_diff(keycodes, last_pressed)
-            released = list_diff(last_pressed, keycodes)
-            for keycode in pressed:
+
+            if keycodes == [Keycode.CONTROL, Keycode.ALT, Keycode.ENTER]:
+                if listening_for_prompt == False:
+                    listening_for_prompt = True
+                    LED.value = True
+                else:
+                    listening_for_prompt = False
+                    LED.value = False
+                    print(current_prompt)
+                    call_api = True
+
+            pressed_keycodes = list_diff(keycodes, last_pressed_keycodes)
+            released_keycodes = list_diff(last_pressed_keycodes, keycodes)
+            pressed_characters = list_diff(characters, last_pressed_characters)
+            released_characters = list_diff(last_pressed_characters, characters)
+            for keycode in pressed_keycodes:
                 kbd.press(keycode)
-            for keycode in released:
+            for keycode in released_keycodes:
                 kbd.release(keycode)
-            last_pressed = keycodes
+
+            if listening_for_prompt:
+                if(len(pressed_characters) > 0):
+                    # Exit if escape is pressed
+                    if pressed_characters[0] == '\x1b':
+                        print("Exiting listening mode")
+                        current_prompt = ""
+                        listening_for_prompt = False
+                        LED.value = False
+                    elif pressed_characters[0] == '\x08':
+                        current_prompt = current_prompt[:-1]
+                    else:
+                        current_prompt += pressed_characters[0]
+
+            last_pressed_keycodes = keycodes
+            last_pressed_characters = characters
+
+            if call_api == True:
+                call_api = False
+                call_chatgpt(current_prompt)
+                current_prompt = ""
+
             current_uart_data = bytearray()
