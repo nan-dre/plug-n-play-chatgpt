@@ -35,21 +35,25 @@ API_KEY = os.getenv("OPENAI_API_KEY")
 if API_KEY is None:
     print("API KEY not found")
 
-time.sleep(1)
-
-
 def connect_to_wifi():
+    tries = 0
     print("Available networks:")
     for network in wifi.radio.start_scanning_networks():
         print("\t%s\t\tRSSI: %d\tChannel: %d" %
               (str(network.ssid, "utf-8"), network.rssi, network.channel))
     wifi.radio.stop_scanning_networks()
-    while wifi.radio.ipv4_address is None:
+    while wifi.radio.ipv4_address is None and tries < 3:
         try:
             wifi.radio.connect(SSID, PASSWORD)
         except:
+            tries += 1
             print("Couldn't connect to WiFi")
-    print("IP address is", wifi.radio.ipv4_address)
+    if tries >= 3:
+        print("Maximum wifi tries reached")
+        return False
+    else:
+        print("IP address is", wifi.radio.ipv4_address)
+        return True
 
 
 def iter_lines(resp):
@@ -69,7 +73,6 @@ def call_chatgpt(text):
     requests = adafruit_requests.Session(pool, ssl.create_default_context())
     full_prompt = [{"role": "user", "content": text},]
     text_response = ""
-    stop = False
     with requests.post("https://api.openai.com/v1/chat/completions",
                        json={"model": "gpt-3.5-turbo",
                              "messages": full_prompt, "stream": True},
@@ -79,12 +82,12 @@ def call_chatgpt(text):
                        ) as response:
         if response.status_code == 200:
             for line in iter_lines(response):
-                # If the user wants to end the prompt early
-                if keyboard_uart.in_waiting:
-                    stop = True
                 if line.startswith("data: [DONE]"):
                     break
-                if line.startswith("data: ") and not stop:
+                if line.startswith("data: "):
+                    # If the user wants to end the prompt early
+                    if keyboard_uart.in_waiting:
+                        break
                     data = json.loads(line[5:])
                     word = data.get('choices')[0].get('delta').get('content')
                     if word is not None:
@@ -96,6 +99,8 @@ def call_chatgpt(text):
                             pass
         else:
             print("Error: ", response.status_code, response.content)
+    del pool
+    del requests
     return text_response
 
 
@@ -204,7 +209,8 @@ def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt,
 
 
 if __name__ == '__main__':
-    connect_to_wifi()
+    if not connect_to_wifi():
+        exit()
     current_uart_data = bytearray()
     last_pressed_keycodes = []
     last_pressed_characters = []
