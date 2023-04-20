@@ -68,11 +68,10 @@ def iter_lines(resp):
         yield (b"".join(partial_line)).decode('utf-8')
 
 
-def call_chatgpt(text):
-    pool = socketpool.SocketPool(wifi.radio)
-    requests = adafruit_requests.Session(pool, ssl.create_default_context())
+def call_chatgpt(text, requests):
     full_prompt = [{"role": "user", "content": text},]
     text_response = ""
+    print("RESPONSE: ")
     with requests.post("https://api.openai.com/v1/chat/completions",
                        json={"model": "gpt-3.5-turbo",
                              "messages": full_prompt, "stream": True},
@@ -99,8 +98,6 @@ def call_chatgpt(text):
                             pass
         else:
             print("Error: ", response.status_code, response.content)
-    del pool
-    del requests
     return text_response
 
 
@@ -114,34 +111,26 @@ def read_uart(current_uart_data):
 def read_from_serial_monitor():
     in_data = bytearray()
     try:
-        while True:
-            if serial_monitor.in_waiting > 0:
-                byte = serial_monitor.read(1)
-                if byte == b'\n':
-                    return in_data.decode('utf-8')
-                else:
-                    in_data.append(byte[0])
-                    if len(in_data) == 129:
-                        in_data = in_data[128] + in_data[0:127]
+        while serial_monitor.in_waiting:
+            byte = serial_monitor.read(1)
+            if byte[0] == 255:
+                return None, in_data.decode('utf-8')
+            else:
+                in_data.append(byte[0])
     except Exception as e:
-        print(e)
+        return e, in_data
+    return None, in_data.decode('utf-8')
 
 
 def list_diff(l1, l2):
     return [x for x in l1 if x not in l2]
 
-
-def parse_packet(packet):
+def parse_packet(packet, modifier_pos, first_key_pos, last_key_pos):
     keycodes = []
     modifiers = []
     characters = []
-    L_MODIFIER_LIST = [Keycode.LEFT_CONTROL,
-                       Keycode.LEFT_SHIFT, Keycode.LEFT_ALT, Keycode.LEFT_GUI]
-    R_MODIFIER_LIST = [Keycode.RIGHT_CONTROL,
-                       Keycode.RIGHT_SHIFT, Keycode.RIGHT_ALT, Keycode.RIGHT_GUI]
-
-    L_modifiers_mask = packet[1] & 0b00001111
-    R_modifiers_mask = (packet[1] & 0b11110000) >> 4
+    L_modifiers_mask = packet[modifier_pos] & 0b00001111
+    R_modifiers_mask = (packet[modifier_pos] & 0b11110000) >> 4
     L_modifiers = [L_MODIFIER_LIST[i] for i in range(
         len(L_MODIFIER_LIST)) if (L_modifiers_mask >> i) & 1]
     R_modifiers = [R_MODIFIER_LIST[i] for i in range(
@@ -150,7 +139,7 @@ def parse_packet(packet):
     modifiers.extend(R_modifiers)
     keycodes.extend(modifiers)
 
-    for i in range(3, 8):
+    for i in range(first_key_pos, last_key_pos + 1):
         character = HID_KEYCODE_TO_ASCII[packet[i]][0]
         if character == '\xcc':
             keycodes.append(Keycode.CAPS_LOCK)
@@ -170,7 +159,7 @@ def parse_packet(packet):
 
 
 def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt, LED, kbd, call_api):
-    if keycodes == [Keycode.CONTROL, Keycode.ALT, Keycode.G]:
+    if keycodes == [Keycode.GUI, Keycode.ENTER]:
         if listening_for_prompt == False:
             listening_for_prompt = True
             LED.value = True
@@ -182,7 +171,7 @@ def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt,
     pressed_keycodes = list_diff(keycodes, last_pressed_keycodes)
     released_keycodes = list_diff(last_pressed_keycodes, keycodes)
     pressed_characters = list_diff(characters, last_pressed_characters)
-    released_characters = list_diff(last_pressed_characters, characters)
+    # released_characters = list_diff(last_pressed_characters, characters)
 
     for keycode in pressed_keycodes:
         kbd.press(keycode)
@@ -211,18 +200,20 @@ def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt,
 if __name__ == '__main__':
     if not connect_to_wifi():
         exit()
+    pool = socketpool.SocketPool(wifi.radio)
+    requests = adafruit_requests.Session(pool, ssl.create_default_context())
     current_uart_data = bytearray()
+    current_serial_data = ''
     last_pressed_keycodes = []
     last_pressed_characters = []
     current_prompt = ''
     listening_for_prompt = False
     call_api = False
     LED.value = False
+    works = False
     while True:
         read_uart(current_uart_data)
         # Skip initial packet
-        if (len(current_uart_data) > 0 and current_uart_data[0] != 1):
-            continue
         if len(current_uart_data) > 0 and current_uart_data[-1] == 255:
             packet_count = 0
             for i in range(len(current_uart_data)):
@@ -232,9 +223,12 @@ if __name__ == '__main__':
             packets = [current_uart_data[i:i+packet_length]
                        for i in range(0, len(current_uart_data), packet_length)]
             for packet in packets:
-                keycodes, characters = parse_packet(packet)
-                # print(packet)
-                # print(keycodes)
+                if len(packet) == 14:
+                    keycodes, characters = parse_packet(packet, modifier_pos=1, first_key_pos=3, last_key_pos=7)
+                elif len(packet) == 9:
+                    keycodes, characters = parse_packet(packet, modifier_pos=0, first_key_pos=2, last_key_pos=6)
+                else:
+                    continue
 
                 listening_for_prompt, call_api, current_prompt, keycodes, characters = process_keycodes(
                     keycodes,
@@ -251,6 +245,16 @@ if __name__ == '__main__':
                 if call_api == True and keycodes == []:
                     call_api = False
                     print(current_prompt)
-                    current_prompt += call_chatgpt(current_prompt)
+                    current_prompt += call_chatgpt(current_prompt, requests)
 
             current_uart_data = bytearray()
+
+        exception, current_serial_data = read_from_serial_monitor()
+        if len(current_serial_data) > 0 and listening_for_prompt:
+            time.sleep(3)
+            current_prompt += current_serial_data
+            print(current_prompt)
+        # What could the problem be with this code?
+        # As an AI language model, I cannot provide an answer without seeing the code. Can you please provide the code that you are referring to?
+
+
