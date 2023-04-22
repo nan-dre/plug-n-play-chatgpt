@@ -13,7 +13,7 @@ import usb_cdc
 from adafruit_hid.keyboard import Keyboard
 from adafruit_hid.keycode import Keycode
 from adafruit_hid.keyboard_layout_us import KeyboardLayoutUS
-from hid import HID_KEYCODE_TO_ASCII, L_MODIFIER_LIST, R_MODIFIER_LIST
+from hid import HID_KEYCODE_TO_ASCII, L_MODIFIER_LIST, R_MODIFIER_LIST, SHIFTED_CHARACTERS, DECODE_DIACRITICS
 from digitalio import DigitalInOut, Direction
 
 # Setup keybord UART communication
@@ -55,6 +55,10 @@ def connect_to_wifi():
         print("IP address is", wifi.radio.ipv4_address)
         return True
 
+def remove_diacritics(word):
+    for diacritic in DECODE_DIACRITICS:
+        word = word.replace(diacritic, DECODE_DIACRITICS[diacritic])
+    return word
 
 def iter_lines(resp):
     partial_line = []
@@ -90,6 +94,7 @@ def call_chatgpt(text, requests):
                     data = json.loads(line[5:])
                     word = data.get('choices')[0].get('delta').get('content')
                     if word is not None:
+                        word = remove_diacritics(word)
                         print(word, end="")
                         text_response += word
                         layout.write(word)
@@ -137,13 +142,9 @@ def parse_packet(packet, modifier_pos, first_key_pos, last_key_pos):
     keycodes.extend(modifiers)
 
     for i in range(first_key_pos, last_key_pos + 1):
-        character = HID_KEYCODE_TO_ASCII[packet[i]]
-        if character != (0, 0):
-            if Keycode.LEFT_SHIFT in modifiers or Keycode.RIGHT_SHIFT in modifiers:
-                characters.append(character[1])
-            else:
-                characters.append(character[0])
-
+        character = HID_KEYCODE_TO_ASCII[packet[i]][0]
+        if character != 0:
+            characters.append(character)
         keycodes.append(packet[i])
 
     return keycodes, characters
@@ -180,8 +181,9 @@ def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt,
             elif pressed_characters[0] == '\x08':
                 current_prompt = current_prompt[:-1]
             elif (Keycode.CONTROL or Keycode.ALT or Keycode.GUI) not in keycodes:
-                if Keycode.SHIFT in keycodes:
-                    current_prompt += pressed_characters[0].upper()
+                shifted_character = SHIFTED_CHARACTERS.get(pressed_characters[0])
+                if Keycode.SHIFT in keycodes and shifted_character is not None:
+                        current_prompt += shifted_character
                 else:
                     current_prompt += pressed_characters[0]
 
