@@ -94,9 +94,9 @@ def call_chatgpt(text, requests):
                     data = json.loads(line[5:])
                     word = data.get('choices')[0].get('delta').get('content')
                     if word is not None:
+                        text_response += word
                         word = remove_diacritics(word)
                         print(word, end="")
-                        text_response += word
                         layout.write(word)
         else:
             print("Error: ", response.status_code, response.content)
