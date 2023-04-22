@@ -92,10 +92,7 @@ def call_chatgpt(text, requests):
                     if word is not None:
                         print(word, end="")
                         text_response += word
-                        try:
-                            layout.write(word)
-                        except:
-                            pass
+                        layout.write(word)
         else:
             print("Error: ", response.status_code, response.content)
     return text_response
@@ -140,26 +137,20 @@ def parse_packet(packet, modifier_pos, first_key_pos, last_key_pos):
     keycodes.extend(modifiers)
 
     for i in range(first_key_pos, last_key_pos + 1):
-        character = HID_KEYCODE_TO_ASCII[packet[i]][0]
-        if character == '\xcc':
-            keycodes.append(Keycode.CAPS_LOCK)
-        elif character == '\xaa':
-            keycodes.append(Keycode.RIGHT_ARROW)
-        elif character == '\xab':
-            keycodes.append(Keycode.LEFT_ARROW)
-        elif character == '\xac':
-            keycodes.append(Keycode.DOWN_ARROW)
-        elif character == '\xad':
-            keycodes.append(Keycode.UP_ARROW)
-        elif character != 0:
-            characters.append(character)
-            keycodes.append(layout.keycodes(character)[0])
+        character = HID_KEYCODE_TO_ASCII[packet[i]]
+        if character != (0, 0):
+            if Keycode.LEFT_SHIFT in modifiers or Keycode.RIGHT_SHIFT in modifiers:
+                characters.append(character[1])
+            else:
+                characters.append(character[0])
+
+        keycodes.append(packet[i])
 
     return keycodes, characters
 
 
 def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt, LED, kbd, call_api):
-    if keycodes == [Keycode.GUI, Keycode.ENTER]:
+    if Keycode.GUI in keycodes and Keycode.ENTER in keycodes and Keycode.SHIFT not in keycodes:
         if listening_for_prompt == False:
             listening_for_prompt = True
             LED.value = True
@@ -242,7 +233,7 @@ if __name__ == '__main__':
                 last_pressed_keycodes = keycodes
                 last_pressed_characters = characters
 
-                if call_api == True and keycodes == []:
+                if call_api == True and all(i == 0 for i in keycodes):
                     call_api = False
                     print(current_prompt)
                     current_prompt += call_chatgpt(current_prompt, requests)
@@ -254,7 +245,5 @@ if __name__ == '__main__':
             time.sleep(3)
             current_prompt += current_serial_data
             print(current_prompt)
-        # What could the problem be with this code?
-        # As an AI language model, I cannot provide an answer without seeing the code. Can you please provide the code that you are referring to?
 
 
