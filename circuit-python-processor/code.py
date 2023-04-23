@@ -9,12 +9,13 @@ import socketpool
 import adafruit_requests
 import json
 import usb_cdc
+import rotaryio
 
 from adafruit_hid.keyboard import Keyboard
 from adafruit_hid.keycode import Keycode
 from adafruit_hid.keyboard_layout_us import KeyboardLayoutUS
 from hid import HID_KEYCODE_TO_ASCII, L_MODIFIER_LIST, R_MODIFIER_LIST, SHIFTED_CHARACTERS, DECODE_DIACRITICS
-from digitalio import DigitalInOut, Direction
+from digitalio import DigitalInOut, Direction, Pull
 
 # Setup keybord UART communication
 keyboard_uart = busio.UART(board.GP0, board.GP1, baudrate=115200)
@@ -25,6 +26,12 @@ serial_monitor = usb_cdc.console
 # Set up a keyboard device.
 kbd = Keyboard(usb_hid.devices)
 layout = KeyboardLayoutUS(kbd)
+
+# Set up a rotary encoder
+encoder = rotaryio.IncrementalEncoder(board.GP16, board.GP17)
+button = DigitalInOut(board.GP18)
+button.direction = Direction.INPUT
+button.pull = Pull.UP
 
 LED = DigitalInOut(board.LED)
 LED.direction = Direction.OUTPUT
@@ -203,7 +210,8 @@ if __name__ == '__main__':
     listening_for_prompt = False
     call_api = False
     LED.value = False
-    works = False
+    last_position = None
+    button_state = None
     while True:
         read_uart(current_uart_data)
         # Skip initial packet
@@ -247,5 +255,18 @@ if __name__ == '__main__':
             time.sleep(3)
             current_prompt += current_serial_data
             print(current_prompt)
+        
+        position = encoder.position
+        if last_position is None or position != last_position:
+            print(position)
+        last_position = position
+        if button.value and button_state is None:
+            button_state = "pressed"
+        if not button.value and button_state == "pressed":
+            button_state = None
+            print("Button pressed")
+    
+
+
 
 
