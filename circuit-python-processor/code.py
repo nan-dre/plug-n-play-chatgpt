@@ -10,6 +10,12 @@ import adafruit_requests
 import json
 import usb_cdc
 import rotaryio
+import displayio
+import adafruit_ili9341
+import terminalio
+import gc
+from adafruit_display_text import label, wrap_text_to_pixels
+
 
 from adafruit_hid.keyboard import Keyboard
 from adafruit_hid.keycode import Keycode
@@ -33,6 +39,18 @@ button = DigitalInOut(board.GP18)
 button.direction = Direction.INPUT
 button.pull = Pull.UP
 
+# Set up display
+DISPLAY_WIDTH = 240
+DISPLAY_HEIGHT = 320
+SCALE_FACTOR = 2
+CHARACTER_LIMIT = 130
+displayio.release_displays()
+spi = busio.SPI(clock=board.GP10, MOSI=board.GP11)
+display_bus = displayio.FourWire(spi, command=board.GP12, chip_select=board.GP13, reset=board.GP14)
+display = adafruit_ili9341.ILI9341(display_bus, width=DISPLAY_WIDTH, height=DISPLAY_HEIGHT, rotation=180)
+current_display_prompt = ""
+
+
 LED = DigitalInOut(board.LED)
 LED.direction = Direction.OUTPUT
 API_LINK = "https://api.openai.com/v1/engines/chat/completions"
@@ -41,6 +59,29 @@ PASSWORD = os.getenv("WIFI_PASSWORD")
 API_KEY = os.getenv("OPENAI_API_KEY")
 if API_KEY is None:
     print("API KEY not found")
+
+def initialize_display():
+    splash = displayio.Group()
+    display.show(splash)
+
+    # Draw a smaller inner rectangle
+    inner_bitmap = displayio.Bitmap(DISPLAY_WIDTH, DISPLAY_HEIGHT, 1)
+    inner_palette = displayio.Palette(1)
+    inner_palette[0] = 0xFFFFFF  # Black
+    inner_sprite = displayio.TileGrid(inner_bitmap, pixel_shader=inner_palette, x=0, y=0)
+    splash.append(inner_sprite)
+
+    # Draw a label
+
+    text_group = displayio.Group(scale=SCALE_FACTOR, x=0, y=20)
+    text_area = label.Label(terminalio.FONT, text="", color=0x000000, )
+    text_group.append(text_area)  # Subgroup for text scaling
+    splash.append(text_group)
+    return text_area
+
+def display_text(label, text):
+    wrapped_text = "\n".join(wrap_text_to_pixels(text, max_width=DISPLAY_WIDTH/SCALE_FACTOR, font=terminalio.FONT))
+    label.text = wrapped_text
 
 def connect_to_wifi():
     tries = 0
@@ -79,9 +120,10 @@ def iter_lines(resp):
         yield (b"".join(partial_line)).decode('utf-8')
 
 
-def call_chatgpt(text, requests):
+def call_chatgpt(text, requests, label):
     full_prompt = [{"role": "user", "content": text},]
     text_response = ""
+    global current_display_prompt
     print("RESPONSE: ")
     with requests.post("https://api.openai.com/v1/chat/completions",
                        json={"model": "gpt-3.5-turbo",
@@ -103,10 +145,15 @@ def call_chatgpt(text, requests):
                     if word is not None:
                         text_response += word
                         word = remove_diacritics(word)
+                        current_display_prompt += word
+                        if(len(current_display_prompt) > CHARACTER_LIMIT):
+                            display_text(label, current_display_prompt)
+                            current_display_prompt = ""
                         print(word, end="")
                         layout.write(word)
         else:
             print("Error: ", response.status_code, response.content)
+    display_text(label, current_display_prompt)
     return text_response
 
 
@@ -200,6 +247,7 @@ def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt,
 if __name__ == '__main__':
     if not connect_to_wifi():
         exit()
+    label = initialize_display()
     pool = socketpool.SocketPool(wifi.radio)
     requests = adafruit_requests.Session(pool, ssl.create_default_context())
     current_uart_data = bytearray()
@@ -246,7 +294,8 @@ if __name__ == '__main__':
                 if call_api == True and all(i == 0 for i in keycodes):
                     call_api = False
                     print(current_prompt)
-                    current_prompt += call_chatgpt(current_prompt, requests)
+                    display_text(label, current_prompt)
+                    current_prompt += call_chatgpt(current_prompt, requests, label)
 
             current_uart_data = bytearray()
 
@@ -265,8 +314,3 @@ if __name__ == '__main__':
         if not button.value and button_state == "pressed":
             button_state = None
             print("Button pressed")
-    
-
-
-
-
