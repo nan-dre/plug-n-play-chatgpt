@@ -13,6 +13,7 @@ import rotaryio
 import displayio
 import adafruit_ili9341
 import terminalio
+import analogio
 import gc
 from adafruit_display_text import label, wrap_text_to_pixels
 
@@ -26,18 +27,28 @@ from digitalio import DigitalInOut, Direction, Pull
 # Setup keybord UART communication
 keyboard_uart = busio.UART(board.GP0, board.GP1, baudrate=115200)
 
+LED = DigitalInOut(board.LED)
+LED.direction = Direction.OUTPUT
+
 # Setup USB monitor communication
 serial_monitor = usb_cdc.console
 
+
 # Set up a keyboard device.
-kbd = Keyboard(usb_hid.devices)
-layout = KeyboardLayoutUS(kbd)
+connected_to_pc = True
+try:
+    kbd = Keyboard(usb_hid.devices)
+    layout = KeyboardLayoutUS(kbd)
+except:
+    connected_to_pc = False
 
 # Set up a rotary encoder
-encoder = rotaryio.IncrementalEncoder(board.GP16, board.GP17)
+encoder = rotaryio.IncrementalEncoder(board.GP17, board.GP16)
 button = DigitalInOut(board.GP18)
 button.direction = Direction.INPUT
 button.pull = Pull.UP
+
+DIRECTIONS = ["up", "down", "left", "right", "center"]
 
 # Set up display
 DISPLAY_WIDTH = 240
@@ -51,8 +62,6 @@ display = adafruit_ili9341.ILI9341(display_bus, width=DISPLAY_WIDTH, height=DISP
 current_display_prompt = ""
 
 
-LED = DigitalInOut(board.LED)
-LED.direction = Direction.OUTPUT
 API_LINK = "https://api.openai.com/v1/engines/chat/completions"
 SSID = os.getenv("WIFI_SSID")
 PASSWORD = os.getenv("WIFI_PASSWORD")
@@ -150,7 +159,8 @@ def call_chatgpt(text, requests, label):
                             display_text(label, current_display_prompt)
                             current_display_prompt = ""
                         print(word, end="")
-                        layout.write(word)
+                        if connected_to_pc:
+                            layout.write(word)
         else:
             print("Error: ", response.status_code, response.content)
     display_text(label, current_display_prompt)
@@ -204,7 +214,7 @@ def parse_packet(packet, modifier_pos, first_key_pos, last_key_pos):
     return keycodes, characters
 
 
-def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt, LED, kbd, call_api):
+def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt, LED, call_api):
     if Keycode.GUI in keycodes and Keycode.ENTER in keycodes and Keycode.SHIFT not in keycodes:
         if listening_for_prompt == False:
             listening_for_prompt = True
@@ -219,10 +229,11 @@ def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt,
     pressed_characters = list_diff(characters, last_pressed_characters)
     # released_characters = list_diff(last_pressed_characters, characters)
 
-    for keycode in pressed_keycodes:
-        kbd.press(keycode)
-    for keycode in released_keycodes:
-        kbd.release(keycode)
+    if connected_to_pc:
+        for keycode in pressed_keycodes:
+            kbd.press(keycode)
+        for keycode in released_keycodes:
+            kbd.release(keycode)
 
     if listening_for_prompt:
         if (len(pressed_characters) > 0):
@@ -285,7 +296,6 @@ if __name__ == '__main__':
                     current_prompt,
                     listening_for_prompt,
                     LED,
-                    kbd,
                     call_api,
                 )
                 last_pressed_keycodes = keycodes
