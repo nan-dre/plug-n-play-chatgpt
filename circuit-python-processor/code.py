@@ -32,6 +32,7 @@ LED.direction = Direction.OUTPUT
 
 # Setup USB monitor communication
 serial_monitor = usb_cdc.console
+serial_monitor.timeout = None
 
 
 # Set up a keyboard device.
@@ -69,6 +70,23 @@ API_KEY = os.getenv("OPENAI_API_KEY")
 if API_KEY is None:
     print("API KEY not found")
 
+class Menu:
+    options = ["Simple prompt", "Translate", "Refactor", "Document", "Correct"]
+    prompts = [
+        "",
+        "Translate this text to english: ",
+        "Refactor this code, don't write any other comments: ",
+        "Document this code, don't write any other comments: ",
+        "Correct any mistakes you find in this text: "
+    ]
+    current_option = 0
+
+    def next_option(self):
+        self.current_option = (self.current_option + 1) % len(self.options)
+    
+    def previous_option(self):
+        self.current_option = (self.current_option - 1) % len(self.options)
+
 def initialize_display():
     splash = displayio.Group()
     display.show(splash)
@@ -91,6 +109,14 @@ def initialize_display():
 def display_text(label, text):
     wrapped_text = "\n".join(wrap_text_to_pixels(text, max_width=DISPLAY_WIDTH/SCALE_FACTOR, font=terminalio.FONT))
     label.text = wrapped_text
+    gc.collect()
+
+def display_list(label, options, current_option):
+    displayed_options = options.copy()
+    displayed_options[current_option] = options[current_option] + " <-"
+    wrapped_text = "\n".join(displayed_options)
+    label.text = wrapped_text
+    gc.collect()
 
 def connect_to_wifi():
     tries = 0
@@ -130,8 +156,8 @@ def iter_lines(resp):
 
 
 def call_chatgpt(text, requests, label):
-    full_prompt = [{"role": "user", "content": text},]
     text_response = ""
+    full_prompt = [{"role": "user", "content": text},]
     global current_display_prompt
     print("RESPONSE: ")
     with requests.post("https://api.openai.com/v1/chat/completions",
@@ -158,12 +184,17 @@ def call_chatgpt(text, requests, label):
                         if(len(current_display_prompt) > CHARACTER_LIMIT):
                             display_text(label, current_display_prompt)
                             current_display_prompt = ""
-                        print(word, end="")
+                        # print(word, end="")
                         if connected_to_pc:
-                            layout.write(word)
+                            try:
+                                layout.write(word)
+                            except:
+                                pass
         else:
             print("Error: ", response.status_code, response.content)
     display_text(label, current_display_prompt)
+    current_display_prompt = ""
+    gc.collect()
     return text_response
 
 
@@ -179,14 +210,10 @@ def read_from_serial_monitor():
     try:
         while serial_monitor.in_waiting:
             byte = serial_monitor.read(1)
-            if byte[0] == 255:
-                return None, in_data.decode('utf-8')
-            else:
-                in_data.append(byte[0])
+            in_data.append(byte[0])
     except Exception as e:
         return e, in_data
     return None, in_data.decode('utf-8')
-
 
 def list_diff(l1, l2):
     return [x for x in l1 if x not in l2]
@@ -259,18 +286,23 @@ if __name__ == '__main__':
     if not connect_to_wifi():
         exit()
     label = initialize_display()
+    menu = Menu()
     pool = socketpool.SocketPool(wifi.radio)
     requests = adafruit_requests.Session(pool, ssl.create_default_context())
     current_uart_data = bytearray()
     current_serial_data = ''
     last_pressed_keycodes = []
     last_pressed_characters = []
+    responses = []
     current_prompt = ''
     listening_for_prompt = False
+    viewing_prompt = False
     call_api = False
     LED.value = False
-    last_position = None
+    last_position = 0
     button_state = None
+    option_selected = True
+    typing = True
     while True:
         read_uart(current_uart_data)
         # Skip initial packet
@@ -300,27 +332,45 @@ if __name__ == '__main__':
                 )
                 last_pressed_keycodes = keycodes
                 last_pressed_characters = characters
+                typing = True
+                if all(i == 0 for i in keycodes):
+                    typing = False
 
-                if call_api == True and all(i == 0 for i in keycodes):
+                if call_api == True and not typing:
                     call_api = False
-                    print(current_prompt)
+                    current_prompt = menu.prompts[menu.current_option] + current_prompt
+                    # print(current_prompt)
                     display_text(label, current_prompt)
+                    viewing_prompt = True
+                    listening_for_serial = False
                     current_prompt += call_chatgpt(current_prompt, requests, label)
 
             current_uart_data = bytearray()
 
+
+        # if not typing:
         exception, current_serial_data = read_from_serial_monitor()
-        if len(current_serial_data) > 0 and listening_for_prompt:
-            time.sleep(3)
-            current_prompt += current_serial_data
-            print(current_prompt)
-        
+        if len(current_serial_data) > 0 and exception == None:
+            print("Serial data: " + current_serial_data)
+            if listening_for_prompt:
+                current_prompt += current_serial_data
+                display_text(label, current_prompt)
+                # print(current_prompt)
+
         position = encoder.position
-        if last_position is None or position != last_position:
-            print(position)
+        if position != last_position:
+            option_selected = True
+            if position > last_position:
+                menu.next_option()
+            else:
+                menu.previous_option()
         last_position = position
         if button.value and button_state is None:
             button_state = "pressed"
         if not button.value and button_state == "pressed":
+            viewing_prompt = False
             button_state = None
-            print("Button pressed")
+
+        if not listening_for_prompt and not viewing_prompt and option_selected:
+            option_selected = False
+            display_list(label, menu.options, menu.current_option)
