@@ -107,7 +107,7 @@ def initialize_display():
     return text_area
 
 def display_text(label, text):
-    wrapped_text = "\n".join(wrap_text_to_pixels(text, max_width=DISPLAY_WIDTH/SCALE_FACTOR, font=terminalio.FONT))
+    wrapped_text = "\n".join(wrap_text_to_pixels(text, max_width=DISPLAY_WIDTH/SCALE_FACTOR, font=terminalio.FONT))[:CHARACTER_LIMIT]
     label.text = wrapped_text
     gc.collect()
 
@@ -120,11 +120,8 @@ def display_list(label, options, current_option):
 
 def connect_to_wifi():
     tries = 0
-    print("Available networks:")
-    for network in wifi.radio.start_scanning_networks():
-        print("\t%s\t\tRSSI: %d\tChannel: %d" %
-              (str(network.ssid, "utf-8"), network.rssi, network.channel))
-    wifi.radio.stop_scanning_networks()
+    # wifi.radio.start_scanning_networks()
+    # wifi.radio.stop_scanning_networks()
     while wifi.radio.ipv4_address is None and tries < 3:
         try:
             wifi.radio.connect(SSID, PASSWORD)
@@ -283,9 +280,9 @@ def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt,
 
 
 if __name__ == '__main__':
+    label = initialize_display()
     if not connect_to_wifi():
         exit()
-    label = initialize_display()
     menu = Menu()
     pool = socketpool.SocketPool(wifi.radio)
     requests = adafruit_requests.Session(pool, ssl.create_default_context())
