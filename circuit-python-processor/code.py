@@ -120,15 +120,15 @@ def display_list(label, options, current_option):
 
 def connect_to_wifi():
     tries = 0
-    # wifi.radio.start_scanning_networks()
-    # wifi.radio.stop_scanning_networks()
-    while wifi.radio.ipv4_address is None and tries < 3:
+    wifi.radio.start_scanning_networks()
+    wifi.radio.stop_scanning_networks()
+    while wifi.radio.ipv4_address is None and tries < 5:
         try:
             wifi.radio.connect(SSID, PASSWORD)
         except:
             tries += 1
             print("Couldn't connect to WiFi")
-    if tries >= 3:
+    if tries >= 5:
         print("Maximum wifi tries reached")
         return False
     else:
@@ -181,7 +181,7 @@ def call_chatgpt(text, requests, label):
                         if(len(current_display_prompt) > CHARACTER_LIMIT):
                             display_text(label, current_display_prompt)
                             current_display_prompt = ""
-                        # print(word, end="")
+                        print(word, end="")
                         if connected_to_pc:
                             try:
                                 layout.write(word)
@@ -280,9 +280,9 @@ def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt,
 
 
 if __name__ == '__main__':
-    label = initialize_display()
     if not connect_to_wifi():
         exit()
+    label = initialize_display()
     menu = Menu()
     pool = socketpool.SocketPool(wifi.radio)
     requests = adafruit_requests.Session(pool, ssl.create_default_context())
@@ -336,7 +336,7 @@ if __name__ == '__main__':
                 if call_api == True and not typing:
                     call_api = False
                     current_prompt = menu.prompts[menu.current_option] + current_prompt
-                    # print(current_prompt)
+                    print(current_prompt)
                     display_text(label, current_prompt)
                     viewing_prompt = True
                     listening_for_serial = False
@@ -352,7 +352,7 @@ if __name__ == '__main__':
             if listening_for_prompt:
                 current_prompt += current_serial_data
                 display_text(label, current_prompt)
-                # print(current_prompt)
+                print(current_prompt)
 
         position = encoder.position
         if position != last_position:
