@@ -13,11 +13,8 @@ import rotaryio
 import displayio
 import adafruit_ili9341
 import terminalio
-import analogio
 import gc
 from adafruit_display_text import label, wrap_text_to_pixels
-
-
 from adafruit_hid.keyboard import Keyboard
 from adafruit_hid.keycode import Keycode
 from adafruit_hid.keyboard_layout_us import KeyboardLayoutUS
@@ -27,13 +24,13 @@ from digitalio import DigitalInOut, Direction, Pull
 # Setup keybord UART communication
 keyboard_uart = busio.UART(board.GP0, board.GP1, baudrate=115200)
 
+# Setup onboard led
 LED = DigitalInOut(board.LED)
 LED.direction = Direction.OUTPUT
 
 # Setup USB monitor communication
 serial_monitor = usb_cdc.console
 serial_monitor.timeout = None
-
 
 # Set up a keyboard device.
 connected_to_pc = True
@@ -60,7 +57,6 @@ displayio.release_displays()
 spi = busio.SPI(clock=board.GP10, MOSI=board.GP11)
 display_bus = displayio.FourWire(spi, command=board.GP12, chip_select=board.GP13, reset=board.GP14)
 display = adafruit_ili9341.ILI9341(display_bus, width=DISPLAY_WIDTH, height=DISPLAY_HEIGHT, rotation=180)
-current_display_prompt = ""
 
 
 API_LINK = "https://api.openai.com/v1/engines/chat/completions"
@@ -69,6 +65,24 @@ PASSWORD = os.getenv("WIFI_PASSWORD")
 API_KEY = os.getenv("OPENAI_API_KEY")
 if API_KEY is None:
     print("API KEY not found")
+
+class Result:
+    def __init__(self, full_prompt, prompt_list):
+        self.full_prompt = full_prompt
+        self.prompt_list = prompt_list
+        self.current_counter = len(prompt_list) - 1
+    
+    def display_next_prompt(self, label):
+        self.current_counter += 1
+        if self.current_counter >= len(self.prompt_list):
+            self.current_counter = len(self.prompt_list) - 1
+        display_text(label, self.prompt_list[self.current_counter])
+    
+    def display_previous_prompt(self, label):
+        self.current_counter -= 1 
+        if self.current_counter < 0:
+            self.current_counter = 0
+        display_text(label, self.list_results[self.prompt_list])
 
 class Menu:
     options = ["Simple prompt", "Translate", "Refactor", "Document", "Correct"]
@@ -101,7 +115,7 @@ def initialize_display():
     # Draw a label
 
     text_group = displayio.Group(scale=SCALE_FACTOR, x=0, y=20)
-    text_area = label.Label(terminalio.FONT, text="", color=0x000000, )
+    text_area = label.Label(terminalio.FONT, text="", color=0x000000)
     text_group.append(text_area)  # Subgroup for text scaling
     splash.append(text_group)
     return text_area
@@ -155,7 +169,8 @@ def iter_lines(resp):
 def call_chatgpt(text, requests, label):
     text_response = ""
     full_prompt = [{"role": "user", "content": text},]
-    global current_display_prompt
+    current_display_prompt = ""
+    segmented_display_prompt = []
     print("RESPONSE: ")
     with requests.post("https://api.openai.com/v1/chat/completions",
                        json={"model": "gpt-3.5-turbo",
@@ -180,6 +195,7 @@ def call_chatgpt(text, requests, label):
                         current_display_prompt += word
                         if(len(current_display_prompt) > CHARACTER_LIMIT):
                             display_text(label, current_display_prompt)
+                            segmented_display_prompt.append(current_display_prompt)
                             current_display_prompt = ""
                         print(word, end="")
                         if connected_to_pc:
@@ -190,9 +206,9 @@ def call_chatgpt(text, requests, label):
         else:
             print("Error: ", response.status_code, response.content)
     display_text(label, current_display_prompt)
-    current_display_prompt = ""
     gc.collect()
-    return text_response
+    result = Result(text_response, segmented_display_prompt)
+    return result
 
 
 def read_uart(current_uart_data):
@@ -300,6 +316,7 @@ if __name__ == '__main__':
     button_state = None
     option_selected = True
     typing = True
+    result = None
     while True:
         read_uart(current_uart_data)
         # Skip initial packet
@@ -340,7 +357,8 @@ if __name__ == '__main__':
                     display_text(label, current_prompt)
                     viewing_prompt = True
                     listening_for_serial = False
-                    current_prompt += call_chatgpt(current_prompt, requests, label)
+                    result = call_chatgpt(current_prompt, requests, label)
+                    current_prompt += result.full_prompt
 
             current_uart_data = bytearray()
 
@@ -356,11 +374,17 @@ if __name__ == '__main__':
 
         position = encoder.position
         if position != last_position:
-            option_selected = True
-            if position > last_position:
-                menu.next_option()
+            if viewing_prompt and result is not None:
+                if position > last_position:
+                    result.display_next_prompt(label)
+                else:
+                    result.display_previous_prompt(label)
             else:
-                menu.previous_option()
+                option_selected = True
+                if position > last_position:
+                    menu.next_option()
+                else:
+                    menu.previous_option()
         last_position = position
         if button.value and button_state is None:
             button_state = "pressed"
