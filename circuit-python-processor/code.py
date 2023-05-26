@@ -66,6 +66,8 @@ current_display_prompt = ""
 API_LINK = "https://api.openai.com/v1/engines/chat/completions"
 SSID = os.getenv("WIFI_SSID")
 PASSWORD = os.getenv("WIFI_PASSWORD")
+SSID_AUX = os.getenv("WIFI_SSID_AUX")
+PASSWORD_AUX = os.getenv("WIFI_PASSWORD_AUX")
 API_KEY = os.getenv("OPENAI_API_KEY")
 if API_KEY is None:
     print("API KEY not found")
@@ -118,13 +120,11 @@ def display_list(label, options, current_option):
     label.text = wrapped_text
     gc.collect()
 
-def connect_to_wifi():
+def connect_to_wifi(ssid, password):
     tries = 0
-    wifi.radio.start_scanning_networks()
-    wifi.radio.stop_scanning_networks()
     while wifi.radio.ipv4_address is None and tries < 5:
         try:
-            wifi.radio.connect(SSID, PASSWORD)
+            wifi.radio.connect(ssid, password)
         except:
             tries += 1
             print("Couldn't connect to WiFi")
@@ -280,7 +280,12 @@ def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt,
 
 
 if __name__ == '__main__':
-    if not connect_to_wifi():
+    ret = connect_to_wifi(SSID, PASSWORD)
+    if not ret:
+        print("Connecting to aux wifi")
+        ret = connect_to_wifi(SSID_AUX, PASSWORD_AUX)
+    if not ret:
+        print("Couldn't connect to wifi")
         exit()
     label = initialize_display()
     menu = Menu()
