@@ -53,10 +53,13 @@ DISPLAY_WIDTH = 240
 DISPLAY_HEIGHT = 320
 SCALE_FACTOR = 2
 CHARACTER_LIMIT = 130
+MAX_ROWS = 9
 displayio.release_displays()
 spi = busio.SPI(clock=board.GP10, MOSI=board.GP11)
-display_bus = displayio.FourWire(spi, command=board.GP12, chip_select=board.GP13, reset=board.GP14)
-display = adafruit_ili9341.ILI9341(display_bus, width=DISPLAY_WIDTH, height=DISPLAY_HEIGHT, rotation=180)
+display_bus = displayio.FourWire(
+    spi, command=board.GP12, chip_select=board.GP13, reset=board.GP14)
+display = adafruit_ili9341.ILI9341(
+    display_bus, width=DISPLAY_WIDTH, height=DISPLAY_HEIGHT, rotation=180)
 
 
 API_LINK = "https://api.openai.com/v1/engines/chat/completions"
@@ -68,23 +71,27 @@ API_KEY = os.getenv("OPENAI_API_KEY")
 if API_KEY is None:
     print("API KEY not found")
 
+DEBUGGING = False
+
+
 class Result:
     def __init__(self, full_prompt, prompt_list):
         self.full_prompt = full_prompt
         self.prompt_list = prompt_list
         self.current_counter = len(prompt_list) - 1
-    
+
     def display_next_prompt(self, label):
         self.current_counter += 1
         if self.current_counter >= len(self.prompt_list):
             self.current_counter = len(self.prompt_list) - 1
         display_text(label, self.prompt_list[self.current_counter])
-    
+
     def display_previous_prompt(self, label):
-        self.current_counter -= 1 
+        self.current_counter -= 1
         if self.current_counter < 0:
             self.current_counter = 0
-        display_text(label, self.list_results[self.prompt_list])
+        display_text(label, self.prompt_list[self.current_counter])
+
 
 class Menu:
     options = ["Simple prompt", "Translate", "Refactor", "Document", "Correct"]
@@ -99,9 +106,10 @@ class Menu:
 
     def next_option(self):
         self.current_option = (self.current_option + 1) % len(self.options)
-    
+
     def previous_option(self):
         self.current_option = (self.current_option - 1) % len(self.options)
+
 
 def initialize_display():
     splash = displayio.Group()
@@ -111,7 +119,8 @@ def initialize_display():
     inner_bitmap = displayio.Bitmap(DISPLAY_WIDTH, DISPLAY_HEIGHT, 1)
     inner_palette = displayio.Palette(1)
     inner_palette[0] = 0xFFFFFF  # Black
-    inner_sprite = displayio.TileGrid(inner_bitmap, pixel_shader=inner_palette, x=0, y=0)
+    inner_sprite = displayio.TileGrid(
+        inner_bitmap, pixel_shader=inner_palette, x=0, y=0)
     splash.append(inner_sprite)
 
     # Draw a label
@@ -122,10 +131,13 @@ def initialize_display():
     splash.append(text_group)
     return text_area
 
+
 def display_text(label, text):
-    wrapped_text = "\n".join(wrap_text_to_pixels(text, max_width=DISPLAY_WIDTH/SCALE_FACTOR, font=terminalio.FONT))[:CHARACTER_LIMIT]
+    text_list = wrap_text_to_pixels(text, max_width=DISPLAY_WIDTH / SCALE_FACTOR, font=terminalio.FONT)
+    wrapped_text = "\n".join(text_list)
     label.text = wrapped_text
     gc.collect()
+
 
 def display_list(label, options, current_option):
     displayed_options = options.copy()
@@ -133,6 +145,7 @@ def display_list(label, options, current_option):
     wrapped_text = "\n".join(displayed_options)
     label.text = wrapped_text
     gc.collect()
+
 
 def connect_to_wifi(ssid, password):
     tries = 0
@@ -149,10 +162,12 @@ def connect_to_wifi(ssid, password):
         print("IP address is", wifi.radio.ipv4_address)
         return True
 
+
 def remove_diacritics(word):
     for diacritic in DECODE_DIACRITICS:
         word = word.replace(diacritic, DECODE_DIACRITICS[diacritic])
     return word
+
 
 def iter_lines(resp):
     partial_line = []
@@ -173,12 +188,12 @@ def call_chatgpt(text, requests, label):
     segmented_display_prompt = []
     print("RESPONSE: ")
     with requests.post("https://api.openai.com/v1/chat/completions",
-                       json={"model": "gpt-3.5-turbo",
-                             "messages": full_prompt, "stream": True},
-                       headers={
+                        json={"model": "gpt-3.5-turbo",
+                                "messages": full_prompt, "stream": True},
+                        headers={
             "Authorization": f"Bearer {API_KEY}",
-                           },
-                       ) as response:
+                            },
+                        ) as response:
         if response.status_code == 200:
             for line in iter_lines(response):
                 if line.startswith("data: [DONE]"):
@@ -188,15 +203,22 @@ def call_chatgpt(text, requests, label):
                     if keyboard_uart.in_waiting:
                         break
                     data = json.loads(line[5:])
-                    word = data.get('choices')[0].get('delta').get('content')
+                    word = data.get('choices')[0].get(
+                        'delta').get('content')
                     if word is not None:
-                        text_response += word
                         word = remove_diacritics(word)
+                        text_response += word
                         current_display_prompt += word
-                        if(len(current_display_prompt) > CHARACTER_LIMIT):
+                        wrapped_text = "\n".join(wrap_text_to_pixels(
+                            current_display_prompt, max_width=DISPLAY_WIDTH/SCALE_FACTOR, font=terminalio.FONT))
+                        if (wrapped_text.count("\n") > MAX_ROWS):
+                            # Display the prompt, without the last word, in order to fill last row
+                            # We will reuse it in the next screen
+                            current_display_prompt = current_display_prompt[:-len(word)]
                             display_text(label, current_display_prompt)
-                            segmented_display_prompt.append(current_display_prompt)
-                            current_display_prompt = ""
+                            segmented_display_prompt.append(
+                                current_display_prompt)
+                            current_display_prompt = word
                         print(word, end="")
                         if connected_to_pc:
                             try:
@@ -205,7 +227,9 @@ def call_chatgpt(text, requests, label):
                                 pass
         else:
             print("Error: ", response.status_code, response.content)
-    display_text(label, current_display_prompt)
+    if current_display_prompt != "":
+        segmented_display_prompt.append(current_display_prompt)
+        display_text(label, current_display_prompt)
     gc.collect()
     result = Result(text_response, segmented_display_prompt)
     return result
@@ -228,8 +252,10 @@ def read_from_serial_monitor():
         return e, in_data
     return None, in_data.decode('utf-8')
 
+
 def list_diff(l1, l2):
     return [x for x in l1 if x not in l2]
+
 
 def parse_packet(packet, modifier_pos, first_key_pos, last_key_pos):
     keycodes = []
@@ -286,9 +312,10 @@ def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt,
             elif pressed_characters[0] == '\x08':
                 current_prompt = current_prompt[:-1]
             elif (Keycode.CONTROL or Keycode.ALT or Keycode.GUI) not in keycodes:
-                shifted_character = SHIFTED_CHARACTERS.get(pressed_characters[0])
+                shifted_character = SHIFTED_CHARACTERS.get(
+                    pressed_characters[0])
                 if Keycode.SHIFT in keycodes and shifted_character is not None:
-                        current_prompt += shifted_character
+                    current_prompt += shifted_character
                 else:
                     current_prompt += pressed_characters[0]
 
@@ -335,9 +362,11 @@ if __name__ == '__main__':
                        for i in range(0, len(current_uart_data), packet_length)]
             for packet in packets:
                 if len(packet) == 14:
-                    keycodes, characters = parse_packet(packet, modifier_pos=1, first_key_pos=3, last_key_pos=7)
+                    keycodes, characters = parse_packet(
+                        packet, modifier_pos=1, first_key_pos=3, last_key_pos=7)
                 elif len(packet) == 9:
-                    keycodes, characters = parse_packet(packet, modifier_pos=0, first_key_pos=2, last_key_pos=6)
+                    keycodes, characters = parse_packet(
+                        packet, modifier_pos=0, first_key_pos=2, last_key_pos=6)
                 else:
                     continue
 
@@ -357,7 +386,8 @@ if __name__ == '__main__':
 
                 if call_api == True and not typing:
                     call_api = False
-                    current_prompt = menu.prompts[menu.current_option] + current_prompt
+                    current_prompt = menu.prompts[menu.current_option] + \
+                        current_prompt
                     print(current_prompt)
                     display_text(label, current_prompt)
                     viewing_prompt = True
@@ -366,7 +396,6 @@ if __name__ == '__main__':
                     current_prompt += result.full_prompt
 
             current_uart_data = bytearray()
-
 
         # if not typing:
         exception, current_serial_data = read_from_serial_monitor()
