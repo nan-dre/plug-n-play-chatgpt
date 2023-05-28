@@ -281,8 +281,11 @@ def parse_packet(packet, modifier_pos, first_key_pos, last_key_pos):
 
 
 def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt, LED, call_api):
-    if Keycode.GUI in keycodes and Keycode.ENTER in keycodes and Keycode.SHIFT not in keycodes:
+    if Keycode.GUI in keycodes and Keycode.ENTER in keycodes:
         if listening_for_prompt == False:
+            # Without shift, don't retain context
+            if Keycode.SHIFT not in keycodes:
+                current_prompt = ""
             listening_for_prompt = True
             LED.value = True
         else:
@@ -341,7 +344,8 @@ if __name__ == '__main__':
     responses = []
     current_prompt = ''
     listening_for_prompt = False
-    viewing_prompt = False
+    listening_notification = False
+    viewing_response = False
     call_api = False
     LED.value = False
     last_position = 0
@@ -349,6 +353,7 @@ if __name__ == '__main__':
     option_selected = True
     typing = True
     result = None
+    
     while True:
         read_uart(current_uart_data)
         # Skip initial packet
@@ -389,26 +394,29 @@ if __name__ == '__main__':
                     current_prompt = menu.prompts[menu.current_option] + \
                         current_prompt
                     print(current_prompt)
-                    display_text(label, current_prompt)
-                    viewing_prompt = True
+                    viewing_response = True
                     listening_for_serial = False
+                    listening_notification = False
+                    display_text(label, current_prompt)
                     result = call_chatgpt(current_prompt, requests, label)
                     current_prompt += result.full_prompt
 
             current_uart_data = bytearray()
 
-        # if not typing:
-        exception, current_serial_data = read_from_serial_monitor()
-        if len(current_serial_data) > 0 and exception == None:
-            print("Serial data: " + current_serial_data)
-            if listening_for_prompt:
+        if listening_for_prompt:
+            if listening_notification == False:
+                display_text(label, "Listening for prompt...")
+                listening_notification = True
+            exception, current_serial_data = read_from_serial_monitor()
+            if len(current_serial_data) > 0 and exception == None:
+                print("Serial data: " + current_serial_data)
                 current_prompt += current_serial_data
                 display_text(label, current_prompt)
                 print(current_prompt)
 
         position = encoder.position
         if position != last_position:
-            if viewing_prompt and result is not None:
+            if viewing_response and result is not None:
                 if position > last_position:
                     result.display_next_prompt(label)
                 else:
@@ -423,9 +431,9 @@ if __name__ == '__main__':
         if button.value and button_state is None:
             button_state = "pressed"
         if not button.value and button_state == "pressed":
-            viewing_prompt = False
+            viewing_response = False
             button_state = None
 
-        if not listening_for_prompt and not viewing_prompt and option_selected:
+        if not listening_for_prompt and not viewing_response and option_selected:
             option_selected = False
             display_list(label, menu.options, menu.current_option)
