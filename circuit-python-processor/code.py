@@ -52,7 +52,7 @@ DIRECTIONS = ["up", "down", "left", "right", "center"]
 DISPLAY_WIDTH = 240
 DISPLAY_HEIGHT = 320
 SCALE_FACTOR = 2
-CHARACTER_LIMIT = 130
+CHARACTER_LIMIT = 150
 MAX_ROWS = 9
 displayio.release_displays()
 spi = busio.SPI(clock=board.GP10, MOSI=board.GP11)
@@ -133,7 +133,8 @@ def initialize_display():
 
 
 def display_text(label, text):
-    text_list = wrap_text_to_pixels(text, max_width=DISPLAY_WIDTH / SCALE_FACTOR, font=terminalio.FONT)
+    # Limit characters, otherwise it can overflow memory
+    text_list = wrap_text_to_pixels(text[:CHARACTER_LIMIT], max_width=DISPLAY_WIDTH / SCALE_FACTOR, font=terminalio.FONT)
     wrapped_text = "\n".join(text_list)
     label.text = wrapped_text
     gc.collect()
