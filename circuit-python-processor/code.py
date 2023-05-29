@@ -73,9 +73,9 @@ if API_KEY is None:
     print("API KEY not found")
 
 PORT = 5000
-TIMEOUT = None
+TIMEOUT = 7
 BACKLOG = 2
-MAXBUF = 256
+MAXBUF = 1024
 
 DEBUGGING = False
 
@@ -132,15 +132,18 @@ def initialize_tcp_server(pool):
 def accept_packet(socket):
     buf = bytearray(MAXBUF)
     print("Accepting connections")
-    conn, addr = socket.accept()
-    conn.settimeout(TIMEOUT)
-    print("Accepted from", addr)
+    try:
+        conn, addr = socket.accept()
+        conn.settimeout(TIMEOUT)
+        print("Accepted from", addr)
 
-    size = conn.recv_into(buf, MAXBUF)
-    print("Received", buf[:size], size, "bytes")
-    print(str(buf, 'utf-8'))
+        size = conn.recv_into(buf, MAXBUF)
+        print("Received", buf[:size], size, "bytes")
+        print(str(buf, 'utf-8'))
 
-    conn.close()
+        conn.close()
+    except:
+        print("Connection timed out")
     return buf
 
 
@@ -215,7 +218,7 @@ def iter_lines(resp):
         yield (b"".join(partial_line)).decode('utf-8')
 
 
-def call_chatgpt(text, requests, label):
+def call_chatgpt(text, requests, label, inside_IDE):
     text_response = ""
     full_prompt = [{"role": "user", "content": text},]
     current_display_prompt = ""
@@ -243,16 +246,17 @@ def call_chatgpt(text, requests, label):
                         word = remove_diacritics(word)
                         text_response += word
                         current_display_prompt += word
-                        wrapped_text = "\n".join(wrap_text_to_pixels(
-                            current_display_prompt, max_width=DISPLAY_WIDTH/SCALE_FACTOR, font=terminalio.FONT))
-                        if (wrapped_text.count("\n") > MAX_ROWS):
-                            # Display the prompt, without the last word, in order to fill last row
-                            # We will reuse it in the next screen
-                            current_display_prompt = current_display_prompt[:-len(word)]
-                            display_text(label, current_display_prompt)
-                            segmented_display_prompt.append(
-                                current_display_prompt)
-                            current_display_prompt = word
+                        if not inside_IDE:
+                            wrapped_text = "\n".join(wrap_text_to_pixels(
+                                current_display_prompt, max_width=DISPLAY_WIDTH/SCALE_FACTOR, font=terminalio.FONT))
+                            if (wrapped_text.count("\n") > MAX_ROWS):
+                                # Display the prompt, without the last word, in order to fill last row
+                                # We will reuse it in the next screen
+                                current_display_prompt = current_display_prompt[:-len(word)]
+                                display_text(label, current_display_prompt)
+                                segmented_display_prompt.append(
+                                    current_display_prompt)
+                                current_display_prompt = word
                         print(word, end="")
                         if connected_to_pc:
                             try:
@@ -261,7 +265,7 @@ def call_chatgpt(text, requests, label):
                                 pass
         else:
             print("Error: ", response.status_code, response.content)
-    if current_display_prompt != "":
+    if current_display_prompt != "" and not inside_IDE:
         segmented_display_prompt.append(current_display_prompt)
         display_text(label, current_display_prompt)
     gc.collect()
@@ -314,7 +318,7 @@ def parse_packet(packet, modifier_pos, first_key_pos, last_key_pos):
     return keycodes, characters
 
 
-def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt, listening_for_clipboard, LED, call_api):
+def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt, listening_for_clipboard, listening_notification, option_selected, inside_IDE, LED, call_api):
     if Keycode.GUI in keycodes and Keycode.ENTER in keycodes:
         if listening_for_prompt == False:
             # Without shift, don't retain context
@@ -329,6 +333,13 @@ def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt,
 
     if Keycode.CONTROL in keycodes and Keycode.ALT in keycodes and Keycode.TWO in keycodes and listening_for_clipboard == False:
         listening_for_clipboard = True
+
+    if Keycode.CONTROL in keycodes and Keycode.ALT in keycodes and Keycode.ONE in keycodes:
+        if inside_IDE == True:
+            inside_IDE = False
+        else:
+            inside_IDE = True
+            print("INSIDE IDE")
 
     pressed_keycodes = list_diff(keycodes, last_pressed_keycodes)
     released_keycodes = list_diff(last_pressed_keycodes, keycodes)
@@ -348,7 +359,9 @@ def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt,
                 print("Exiting listening mode and deleting history")
                 current_prompt = ""
                 listening_for_prompt = False
+                listening_notification = False
                 LED.value = False
+                option_selected = True
             elif pressed_characters[0] == '\x08':
                 current_prompt = current_prompt[:-1]
             elif (Keycode.CONTROL or Keycode.ALT or Keycode.GUI) not in keycodes:
@@ -360,7 +373,7 @@ def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt,
                     current_prompt += pressed_characters[0]
     
 
-    return listening_for_prompt, listening_for_clipboard, call_api, current_prompt, keycodes, characters
+    return listening_for_prompt, listening_for_clipboard, listening_notification, option_selected, inside_IDE, call_api, current_prompt, keycodes, characters
 
 
 if __name__ == '__main__':
@@ -393,7 +406,7 @@ if __name__ == '__main__':
     typing = True
     result = None
     listening_for_clipboard = False
-    
+    inside_IDE = False
     while True:
         read_uart(current_uart_data)
         # Skip initial packet
@@ -415,12 +428,15 @@ if __name__ == '__main__':
                 else:
                     continue
 
-                listening_for_prompt, listening_for_clipboard, call_api, current_prompt, keycodes, characters = process_keycodes(
+                listening_for_prompt, listening_for_clipboard, listening_notification, option_selected, inside_IDE, call_api, current_prompt, keycodes, characters = process_keycodes(
                     keycodes,
                     characters,
                     current_prompt,
                     listening_for_prompt,
                     listening_for_clipboard,
+                    listening_notification,
+                    option_selected,
+                    inside_IDE,
                     LED,
                     call_api,
                 )
@@ -433,7 +449,10 @@ if __name__ == '__main__':
                 if listening_for_clipboard and not typing:
                     clipboard = accept_packet(socket)
                     current_prompt += str(clipboard, 'utf-8')
+                    display_text(label, current_prompt)
                     listening_for_clipboard = False
+                    del clipboard
+                    gc.collect()
 
                 if call_api == True and not typing:
                     call_api = False
@@ -443,8 +462,9 @@ if __name__ == '__main__':
                     viewing_response = True
                     listening_for_serial = False
                     listening_notification = False
+                    option_selected = True
                     display_text(label, current_prompt)
-                    result = call_chatgpt(current_prompt, requests, label)
+                    result = call_chatgpt(current_prompt, requests, label, inside_IDE)
                     current_prompt += result.full_prompt
 
             current_uart_data = bytearray()
