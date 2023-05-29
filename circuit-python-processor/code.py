@@ -53,7 +53,7 @@ DIRECTIONS = ["up", "down", "left", "right", "center"]
 DISPLAY_WIDTH = 240
 DISPLAY_HEIGHT = 320
 SCALE_FACTOR = 2
-CHARACTER_LIMIT = 150
+CHARACTER_LIMIT = 160
 MAX_ROWS = 9
 displayio.release_displays()
 spi = busio.SPI(clock=board.GP10, MOSI=board.GP11)
@@ -186,9 +186,14 @@ def display_list(label, options, current_option):
 
 def connect_to_wifi(ssid, password):
     tries = 0
-    while wifi.radio.ipv4_address is None and tries < 5:
+    ipv4 =  ipaddress.IPv4Address("192.168.43.164")
+    netmask =  ipaddress.IPv4Address("255.255.255.0")
+    gateway =  ipaddress.IPv4Address("192.168.43.252")
+    wifi.radio.set_ipv4_address(ipv4=ipv4,netmask=netmask,gateway=gateway)
+    while tries < 5:
         try:
             wifi.radio.connect(ssid, password)
+            break
         except:
             tries += 1
             print("Couldn't connect to WiFi")
