@@ -39,4 +39,4 @@ Function Send-TCPMessage {
 $clipboard_text = Get-Clipboard
 $concatenated_string = $clipboard_text -join "`r`n"
 $concatenated_string = $concatenated_string -replace "`r", ""
-Send-TCPMessage -Port 5000 -Endpoint 192.168.0.66 -message $concatenated_string
+Send-TCPMessage -Port 5000 -Endpoint 192.168.43.164 -message $concatenated_string
