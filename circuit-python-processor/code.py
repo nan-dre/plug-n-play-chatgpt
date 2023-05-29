@@ -6,6 +6,7 @@ import time
 import ssl
 import wifi
 import socketpool
+import ipaddress
 import adafruit_requests
 import json
 import usb_cdc
@@ -71,6 +72,11 @@ API_KEY = os.getenv("OPENAI_API_KEY")
 if API_KEY is None:
     print("API KEY not found")
 
+PORT = 5000
+TIMEOUT = None
+BACKLOG = 2
+MAXBUF = 256
+
 DEBUGGING = False
 
 
@@ -109,6 +115,33 @@ class Menu:
 
     def previous_option(self):
         self.current_option = (self.current_option - 1) % len(self.options)
+
+def initialize_tcp_server(pool):
+    HOST = str(wifi.radio.ipv4_address)
+    server = ipaddress.ip_address(pool.getaddrinfo(HOST, PORT)[0][4][0])
+    print("Server ping", server, wifi.radio.ping(server), "ms")
+    print("Create TCP Server socket", (HOST, PORT))
+    s = pool.socket(pool.AF_INET, pool.SOCK_STREAM)
+    s.settimeout(TIMEOUT)
+
+    s.bind((HOST, PORT))
+    s.listen(BACKLOG)
+    print("Listening")
+    return s
+
+def accept_packet(socket):
+    buf = bytearray(MAXBUF)
+    print("Accepting connections")
+    conn, addr = socket.accept()
+    conn.settimeout(TIMEOUT)
+    print("Accepted from", addr)
+
+    size = conn.recv_into(buf, MAXBUF)
+    print("Received", buf[:size], size, "bytes")
+    print(str(buf, 'utf-8'))
+
+    conn.close()
+    return buf
 
 
 def initialize_display():
@@ -281,7 +314,7 @@ def parse_packet(packet, modifier_pos, first_key_pos, last_key_pos):
     return keycodes, characters
 
 
-def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt, LED, call_api):
+def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt, listening_for_clipboard, LED, call_api):
     if Keycode.GUI in keycodes and Keycode.ENTER in keycodes:
         if listening_for_prompt == False:
             # Without shift, don't retain context
@@ -293,6 +326,9 @@ def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt,
             listening_for_prompt = False
             LED.value = False
             call_api = True
+
+    if Keycode.CONTROL in keycodes and Keycode.ALT in keycodes and Keycode.TWO in keycodes and listening_for_clipboard == False:
+        listening_for_clipboard = True
 
     pressed_keycodes = list_diff(keycodes, last_pressed_keycodes)
     released_keycodes = list_diff(last_pressed_keycodes, keycodes)
@@ -322,8 +358,9 @@ def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt,
                     current_prompt += shifted_character
                 else:
                     current_prompt += pressed_characters[0]
+    
 
-    return listening_for_prompt, call_api, current_prompt, keycodes, characters
+    return listening_for_prompt, listening_for_clipboard, call_api, current_prompt, keycodes, characters
 
 
 if __name__ == '__main__':
@@ -334,9 +371,10 @@ if __name__ == '__main__':
     if not ret:
         print("Couldn't connect to wifi")
         exit()
-    label = initialize_display()
     menu = Menu()
     pool = socketpool.SocketPool(wifi.radio)
+    socket = initialize_tcp_server(pool)
+    label = initialize_display()
     requests = adafruit_requests.Session(pool, ssl.create_default_context())
     current_uart_data = bytearray()
     current_serial_data = ''
@@ -354,6 +392,7 @@ if __name__ == '__main__':
     option_selected = True
     typing = True
     result = None
+    listening_for_clipboard = False
     
     while True:
         read_uart(current_uart_data)
@@ -376,11 +415,12 @@ if __name__ == '__main__':
                 else:
                     continue
 
-                listening_for_prompt, call_api, current_prompt, keycodes, characters = process_keycodes(
+                listening_for_prompt, listening_for_clipboard, call_api, current_prompt, keycodes, characters = process_keycodes(
                     keycodes,
                     characters,
                     current_prompt,
                     listening_for_prompt,
+                    listening_for_clipboard,
                     LED,
                     call_api,
                 )
@@ -389,6 +429,11 @@ if __name__ == '__main__':
                 typing = True
                 if all(i == 0 for i in keycodes):
                     typing = False
+
+                if listening_for_clipboard and not typing:
+                    clipboard = accept_packet(socket)
+                    current_prompt += str(clipboard, 'utf-8')
+                    listening_for_clipboard = False
 
                 if call_api == True and not typing:
                     call_api = False
@@ -408,12 +453,12 @@ if __name__ == '__main__':
             if listening_notification == False:
                 display_text(label, "Listening for prompt...")
                 listening_notification = True
-            exception, current_serial_data = read_from_serial_monitor()
-            if len(current_serial_data) > 0 and exception == None:
-                print("Serial data: " + current_serial_data)
-                current_prompt += current_serial_data
-                display_text(label, current_prompt)
-                print(current_prompt)
+            # exception, current_serial_data = read_from_serial_monitor()
+            # if len(current_serial_data) > 0 and exception == None:
+            #     print("Serial data: " + current_serial_data)
+            #     current_prompt += current_serial_data
+            #     display_text(label, current_prompt)
+            #     print(current_prompt)
 
         position = encoder.position
         if position != last_position:
