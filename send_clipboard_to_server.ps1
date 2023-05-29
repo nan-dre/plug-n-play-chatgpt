@@ -23,6 +23,7 @@ Function Send-TCPMessage {
         $Stream = $Socket.GetStream() 
         $Writer = New-Object System.IO.StreamWriter($Stream)
 
+        # Remove carriage returns
         # Write message to stream
         $Message | % {
             $Writer.WriteLine($_)
@@ -35,6 +36,7 @@ Function Send-TCPMessage {
     }
 }
 
-# shortcut target C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -WindowStyle hidden -ExecutionPolicy Bypass -File C:\Users\Andy\Downloads\sent_to_server.ps1
 $clipboard_text = Get-Clipboard
-Send-TCPMessage -Port 5000 -Endpoint 192.168.0.66 -message $clipboard_text
+$concatenated_string = $clipboard_text -join "`r`n"
+$concatenated_string = $concatenated_string -replace "`r", ""
+Send-TCPMessage -Port 5000 -Endpoint 192.168.0.66 -message $concatenated_string
