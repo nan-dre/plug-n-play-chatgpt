@@ -53,7 +53,7 @@ DIRECTIONS = ["up", "down", "left", "right", "center"]
 DISPLAY_WIDTH = 240
 DISPLAY_HEIGHT = 320
 SCALE_FACTOR = 2
-CHARACTER_LIMIT = 160
+CHARACTER_LIMIT = 165
 MAX_ROWS = 9
 displayio.release_displays()
 spi = busio.SPI(clock=board.GP10, MOSI=board.GP11)
@@ -75,7 +75,7 @@ if API_KEY is None:
 PORT = 5000
 TIMEOUT = 7
 BACKLOG = 2
-MAXBUF = 1024
+MAXBUF = 512
 
 DEBUGGING = False
 
@@ -105,7 +105,7 @@ class Menu:
         "",
         "Translate this text to english: ",
         "Refactor this code, don't write any other comments: ",
-        "Document this code, don't write any other comments: ",
+        "Add comments throughout this code, don't return any other text, only the commented code:",
         "Correct any mistakes you find in this text: "
     ]
     current_option = 0
@@ -188,7 +188,7 @@ def connect_to_wifi(ssid, password):
     tries = 0
     ipv4 =  ipaddress.IPv4Address("192.168.43.164")
     netmask =  ipaddress.IPv4Address("255.255.255.0")
-    gateway =  ipaddress.IPv4Address("192.168.43.252")
+    gateway =  ipaddress.IPv4Address("192.168.43.150")
     wifi.radio.set_ipv4_address(ipv4=ipv4,netmask=netmask,gateway=gateway)
     while tries < 5:
         try:
@@ -323,7 +323,7 @@ def parse_packet(packet, modifier_pos, first_key_pos, last_key_pos):
     return keycodes, characters
 
 
-def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt, listening_for_clipboard, listening_notification, option_selected, inside_IDE, LED, call_api):
+def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt, listening_for_clipboard, listening_notification, option_selected, inside_IDE, LED, call_api, label):
     if Keycode.GUI in keycodes and Keycode.ENTER in keycodes:
         if listening_for_prompt == False:
             # Without shift, don't retain context
@@ -342,8 +342,10 @@ def process_keycodes(keycodes, characters, current_prompt, listening_for_prompt,
     if Keycode.CONTROL in keycodes and Keycode.ALT in keycodes and Keycode.ONE in keycodes:
         if inside_IDE == True:
             inside_IDE = False
+            display_text(label, "OUTSIDE IDE")
         else:
             inside_IDE = True
+            display_text(label, "INSIDE IDE")
             print("INSIDE IDE")
 
     pressed_keycodes = list_diff(keycodes, last_pressed_keycodes)
@@ -444,6 +446,7 @@ if __name__ == '__main__':
                     inside_IDE,
                     LED,
                     call_api,
+                    label
                 )
                 last_pressed_keycodes = keycodes
                 last_pressed_characters = characters
